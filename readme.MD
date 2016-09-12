@@ -7,7 +7,7 @@ This repository contains source data and analysis code for the Trend CT story:
 
 # Walkthroughs
 
-* Data analysis and visualizations of national and Connecticut data- [[RMarkdown](https://github.com/trendct-data/job-gap/blob/master/index.Rmd)] [[HTML](http://trendct-data.github.io/job-gap/)]
+* Data analysis and visualizations of national and Connecticut data- [[RMarkdown](https://github.com/trendct-data/job-gap-educational-attainment/blob/master/index.Rmd)] [[HTML](http://trendct-data.github.io/job-gap-educational-attainment/)]
 
 ### The Data
 
@@ -15,7 +15,7 @@ This repository contains source data and analysis code for the Trend CT story:
 
 ### What's in this repo
 
-* `data` [folder]((https://github.com/trendct-data/tree/master/job-gap/data)) with raw data and modified data.
+* `data` [folder]((https://github.com/trendct-data/tree/master/job-gap-educational-attainment/data)) with raw data and modified data.
 * `jobs_ct_census.R` is an R script charting annual Connecticut's job changes over time by educational attainment using the Census API.
 * `state_specific.R` is an R script charting some Connecticut-specific data.
 * `us_visualizations.R` is an R script that will chart the changes in employment by educational attainment. 
