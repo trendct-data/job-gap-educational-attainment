@@ -1,0 +1,410 @@
+---
+title: "Economic recovery by educational attainment"
+author: "Andrew Ba Tran"
+date: "July 12, 2016"
+output: html_document
+---
+
+This is the methodology used for the Trend CT story: [Economic recovery leaving behind those who did not go to college](http://trendct.org/2016/07/13/countrys-economic-recovery-leaving-behind-those-who-did-not-go-to-college/).
+
+Visit the [repo](https://github.com/trendct-data/job-gap/) for the [data](https://github.com/trendct-data/job-gap/tree/master/data) used in this analysis. (Also, check out the reproducible scripts and data behind many of our other stories in our [central data stories repo](https://github.com/trendct-data))
+
+The data used in this analysis was either copy and pasted and cleaned by hand from the Census or brought in using the Census API.
+
+What’s in this walkthrough
+
+Several charts exploring the national and Connecticut-specific employment figures by educational attainment levels.
+
+```{r setup, message=F, warning=F}
+library(dplyr)
+library(tidyr)
+library(extrafont)
+library(ggalt)
+library(lubridate)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(scales)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+# install.packages("devtools")
+#devtools::install_github("hrecht/censusapi")
+library("censusapi")
+
+# This file contains my census api key
+source("keys.R")
+
+# Sign up for your own key
+# http://api.census.gov/data/key_signup.html
+```
+
+# National monthly job change
+
+```{r monthly, fig.width=9, fig.height=7, warning=F, message=F}
+# Bringing in US data. Curated from http://www.census.gov/cps/data/cpstablecreator.html
+
+us_change <- read.csv("data/us_all_raw.csv")
+us_change$Date <- paste0("1-", us_change$Date)
+us_change$Date <- dmy(us_change$Date)
+
+colnames(us_change) <- c("Date", "Bachelor's degree or higher", "Associate's degree or some college", "High school or less")
+
+us_long <- mutate(gather(us_change, area, value, -Date),
+                      area=factor(area, levels=colnames(us_change)[2:4],
+                                  ordered=TRUE))
+
+edu_colors <- c('#66c2a5', '#fc8d62', '#8da0cb')
+names(edu_colors) <- colnames(us_change)[2:4]
+
+last_vals <- sapply(colnames(us_change)[2:4], function(x) last(na.exclude(us_change[,x])))
+last_date <- tail(us_change$Date)#+1 # doing this ^ wld have made it a double
+
+# jobs change (monthly)
+
+gg <- ggplot(us_long)
+gg <- gg + geom_hline(yintercept = 0)
+gg <- gg + geom_line(aes(x=Date, y=value, group=area, color=area))
+#gg <- gg + geom_rect(aes(xmin=as.numeric(ymd("2007-12-01")), xmax=as.numeric(ymd("2010-01-01")), ymin=-Inf, ymax=Inf))
+gg <- gg + annotate("rect", xmin = ymd("2007-12-01"), xmax =ymd("2010-01-01"), ymin = -Inf, ymax = Inf,
+                    alpha = .1)
+
+gg <- gg + scale_color_manual(name="", values=edu_colors)
+#gg <- gg + scale_y_continuous(label=percent)
+gg <- gg + labs(x=NULL, y="Employment change (millions)", title="Job change in recession and recovery in the U.S.",
+                subtitle="Workers with more than a high school education gained 11.5 million of the 11.6 million jobs added in the recovery.",
+                caption="SOURCE: U.S. Census CPS, Georgetown Center on Education and the Workforce")
+gg <- gg + theme_bw(base_family="Helvetica")
+gg <- gg + theme(axis.ticks.y=element_blank())
+gg <- gg + theme(panel.border=element_blank())
+gg <- gg + theme(legend.key=element_blank())
+gg <- gg + theme(plot.title=element_text(face="bold", family="Lato Black", size=22))
+gg <- gg + theme(plot.caption=element_text(face="bold", family="Lato", size=9, color="gray", margin=margin(t=10, r=80)))
+gg <- gg + geom_label(data=us_long, aes(x=ymd("2008-4-01"), y=5, label="Recession", hjust=0),
+                      family="Helvetica", lineheight=0.95,
+                      size=5, label.size=0, color="#2b2b2b")
+gg <- gg + geom_label(data=us_long, aes(x=ymd("2010-4-01"), y=5, label="Recovery", hjust=0),
+                      family="Helvetica", lineheight=0.95,
+                      size=5, label.size=0, color="#2b2b2b")
+gg <- gg + theme(legend.position="none")
+gg <- gg + theme(plot.margin = unit(c(1, 15, 1, 1), "lines"))
+gg
+
+
+for (i in 1:length(last_vals)) {
+  gg <- gg + annotation_custom(grob=textGrob(paste0(names(last_vals)[i], " (", round(last_vals[i],1), ")"), hjust=-.3,
+                                             gp=gpar(fontsize=10, 
+                                                     col=edu_colors[names(last_vals)[i]])),
+                               xmin=as.numeric(last_date[i]),xmax=as.numeric(last_date[i]),
+                               ymin=last_vals[i], ymax=last_vals[i])
+}
+
+gb <- ggplot_build(gg)
+gt <- ggplot_gtable(gb)
+
+gt$layout$clip[gt$layout$name=="panel"] <- "off"
+grid.draw(gt)
+
+```
+
+# Connecticut annual job change
+
+
+```{r ct_only, fig.width=9, fig.height=7, warning=F, message=F}
+# These Census IDs are what we're pulling from the Census API
+
+# B23006_001E - Total
+# B23006_002E - Less than high school graduate
+# B23006_009E - High school graduate (includes equivalency)
+# B23006_016E - Some college or associate's degree
+# B23006_023E - Bachelor's degree or higher
+
+# Function from censusapi to pull 2009 data
+# Replace `census_key` with your individual API key
+
+data2009 <- getCensus(name="acs5", 
+                      vintage=2009,
+                      key=census_key, 
+                      vars=c("NAME", "B23006_002E",
+                             "B23006_009E", "B23006_016E", "B23006_023E"), 
+                      region="state:*")
+
+# adding year identifier for future joining
+
+data2009$state <- 2009
+
+# Cleaning up the column names
+colnames(data2009) <- c("state", "year", "Less than high school graduate", "High school graduate", "Some college or associate's degree", "Bachelor's degree or higher")
+
+# Some math
+data2009$`High school or less` <- data2009$`High school graduate` + data2009$`Less than high school graduate`
+
+# Deleting unnecessary columns
+data2009[,3] <- NULL
+data2009[,3] <- NULL
+
+# Restructuring the data for joining
+data2009 <- data2009 %>%
+  gather("category", "total", 3:5)
+
+# Function from censusapi to pull 2010 data
+# Most of what flows below is the same as the code above but for a different year
+# Probably would be more efficient to write a loop to compile this but it's too late now
+
+data2010 <- getCensus(name="acs5", 
+                      vintage=2010,
+                      key=census_key, 
+                      vars=c("NAME", "B23006_002E",
+                             "B23006_009E", "B23006_016E", "B23006_023E"), 
+                      region="state:*")
+data2010$state <- 2010
+colnames(data2010) <- c("state", "year", "Less than high school graduate", "High school graduate", "Some college or associate's degree", "Bachelor's degree or higher")
+data2010$`High school or less` <- data2010$`High school graduate` + data2010$`Less than high school graduate`
+data2010[,3] <- NULL
+data2010[,3] <- NULL
+
+data2010 <- data2010 %>%
+  gather("category", "total", 3:5)
+
+data2011 <- getCensus(name="acs5", 
+                      vintage=2011,
+                      key=census_key, 
+                      vars=c("NAME", "B23006_002E",
+                             "B23006_009E", "B23006_016E", "B23006_023E"), 
+                      region="state:*")
+data2011$state <- 2011
+colnames(data2011) <- c("state", "year", "Less than high school graduate", "High school graduate", "Some college or associate's degree", "Bachelor's degree or higher")
+data2011$`High school or less` <- data2011$`High school graduate` + data2011$`Less than high school graduate`
+data2011[,3] <- NULL
+data2011[,3] <- NULL
+
+data2011 <- data2011 %>%
+  gather("category", "total", 3:5)
+
+data2012 <- getCensus(name="acs5", 
+                      vintage=2012,
+                      key=census_key, 
+                      vars=c("NAME", "B23006_002E",
+                             "B23006_009E", "B23006_016E", "B23006_023E"), 
+                      region="state:*")
+data2012$state <- 2012
+colnames(data2012) <- c("state", "year", "Less than high school graduate", "High school graduate", "Some college or associate's degree", "Bachelor's degree or higher")
+data2012$`High school or less` <- data2012$`High school graduate` + data2012$`Less than high school graduate`
+data2012[,3] <- NULL
+data2012[,3] <- NULL
+
+data2012 <- data2012 %>%
+  gather("category", "total", 3:5)
+
+data2013 <- getCensus(name="acs5", 
+                      vintage=2013,
+                      key=census_key, 
+                      vars=c("NAME", "B23006_002E",
+                             "B23006_009E", "B23006_016E", "B23006_023E"), 
+                      region="state:*")
+
+data2013$state <- 2013
+colnames(data2013) <- c("state", "year", "Less than high school graduate", "High school graduate", "Some college or associate's degree", "Bachelor's degree or higher")
+data2013$`High school or less` <- data2013$`High school graduate` + data2013$`Less than high school graduate`
+data2013[,3] <- NULL
+data2013[,3] <- NULL
+
+data2013 <- data2013 %>%
+  gather("category", "total", 3:5)
+
+
+data2014 <- getCensus(name="acs5", 
+                      vintage=2014,
+                      key=census_key, 
+                      vars=c("NAME", "B23006_002E",
+                             "B23006_009E", "B23006_016E", "B23006_023E"), 
+                      region="state:*")
+
+data2014$state <- 2014
+colnames(data2014) <- c("state", "year", "Less than high school graduate", "High school graduate", "Some college or associate's degree", "Bachelor's degree or higher")
+data2014$`High school or less` <- data2014$`High school graduate` + data2014$`Less than high school graduate`
+data2014[,3] <- NULL
+data2014[,3] <- NULL
+
+data2014 <- data2014 %>%
+  gather("category", "total", 3:5)
+
+
+data_0914 <- rbind(data2009, data2010, data2011, data2012, data2013, data2014)
+
+# If you want to filter by another state, do so below
+
+ct_data <- data_0914 %>%
+  filter(state=="Connecticut")
+
+ct_data2 <- ct_data %>%
+  spread(category, total)
+
+bach_base <- ct_data2[1,3]
+hs_base <- ct_data2[1,4]
+some_base <- ct_data2[1,5]
+
+ct_data3 <- ct_data2
+ct_data3[,3] <- ct_data2[,3] - bach_base
+ct_data3[,4] <- ct_data2[,4] - hs_base
+ct_data3[,5] <- ct_data2[,5] - some_base
+ct_data3 <- ct_data3 %>%
+  gather("category", "total", 3:5)
+
+ct_colors <- c('#66c2a5', '#8da0cb', '#fc8d62'  )
+names(ct_colors) <- unique(ct_data3$category)
+
+gg <- ggplot(ct_data3)
+gg <- gg + geom_hline(yintercept = 0)
+gg <- gg + geom_line(aes(x=year, y=total, group=category, color=category))
+#gg <- gg + geom_rect(aes(xmin=as.numeric(ymd("2007-12-01")), xmax=as.numeric(ymd("2010-01-01")), ymin=-Inf, ymax=Inf))
+gg <- gg + annotate("rect", xmin = 2009, xmax =2010, ymin = -Inf, ymax = Inf,
+                    alpha = .1)
+gg <- gg + scale_color_manual(name="", values=ct_colors)
+#gg <- gg + scale_y_continuous(label=percent)
+gg <- gg + labs(x=NULL, y="Jobs", title="Job change in recession and recovery in Connecticut",
+                subtitle="Connecticut mirrors the rest of the country for education levels.",
+                caption="SOURCE: U.S. Census ACS 5-year")
+gg <- gg + theme_bw(base_family="Helvetica")
+gg <- gg + theme(axis.ticks.y=element_blank())
+gg <- gg + theme(panel.border=element_blank())
+gg <- gg + theme(legend.key=element_blank())
+gg <- gg + theme(plot.title=element_text(face="bold", family="Lato Black", size=22))
+gg <- gg + theme(plot.caption=element_text(face="bold", family="Lato", size=9, color="gray", margin=margin(t=10, r=80)))
+gg <- gg + geom_label(data=ct_data3, aes(x=2009, y=40000, label="Recession", hjust=-.1),
+                      family="Helvetica", lineheight=0.95,
+                      size=5, label.size=0, color="#2b2b2b")
+gg <- gg + geom_label(data=ct_data3, aes(x=2010, y=40000, label="Recovery", hjust=-.2),
+                      family="Helvetica", lineheight=0.95,
+                      size=5, label.size=0, color="#2b2b2b")
+gg <- gg + theme(legend.position="none")
+gg <- gg + theme(plot.margin = unit(c(1, 15, 1, 1), "lines"))
+
+gg <- gg + annotation_custom(grob=textGrob("High school or less (-14k)", hjust=.5,
+                                           gp=gpar(fontsize=10, 
+                                                   col='#8da0cb')),
+                             xmin=2015,xmax=2015,
+                             ymin=-14053, ymax=-14053)
+gg <- gg + annotation_custom(grob=textGrob("Bachelor's degree or higher (48k)", hjust=.50,  
+                                           gp=gpar(fontsize=10, 
+                                                   col='#66c2a5')),
+                             xmin=2015,xmax=2015,
+                             ymin=48432, ymax=48432)
+gg <- gg + annotation_custom(grob=textGrob("Associate's degree or some college (21k)", hjust=.30,  
+                                           gp=gpar(fontsize=10, 
+                                                   col='#fc8d62')),
+                             xmin=2015,xmax=2015,
+                             ymin=20722, ymax=20722)
+gb <- ggplot_build(gg)
+
+gt <- ggplot_gtable(gb)
+
+gt$layout$clip[gt$layout$name=="panel"] <- "off"
+grid.draw(gt)
+
+```
+
+```{r us_total, fig.width=9, fig.height=7, warning=F, message=F}
+# Bringing in US data. Curated from http://www.census.gov/cps/data/cpstablecreator.html
+
+us <- read.csv("data/education_jobs_us.csv")
+
+# Cleaning up the columns
+us <- us[c("Year","Type","Totals", "Children.under.15","No.high.school.diploma",
+           "High.school.or.equivalent","Some.college..less.than.4.yr.degree","Bachelor.s.degree.or.higher" )]
+
+# Formatting the numbers to eliminate the commas, convert to numeric
+us$Totals <- gsub(",", "", us$Totals)
+us$Totals <- as.numeric(us$Totals)
+us$Children.under.15 <- gsub(",", "", us$Children.under.15)
+us$Children.under.15 <- as.numeric(us$Children.under.15)
+us$No.high.school.diploma <- gsub(",", "", us$No.high.school.diploma)
+us$No.high.school.diploma <- as.numeric(us$No.high.school.diploma)
+us$High.school.or.equivalent <- gsub(",", "", us$High.school.or.equivalent)
+us$High.school.or.equivalent <- as.numeric(us$High.school.or.equivalent)
+us$Some.college..less.than.4.yr.degree <- gsub(",", "", us$Some.college..less.than.4.yr.degree)
+us$Some.college..less.than.4.yr.degree <- as.numeric(us$Some.college..less.than.4.yr.degree)
+us$Bachelor.s.degree.or.higher <- gsub(",", "", us$Bachelor.s.degree.or.higher)
+us$Bachelor.s.degree.or.higher <- as.numeric(us$Bachelor.s.degree.or.higher)
+
+# Years came in an awkward format, so fixing
+us$year <- round(us$Year,0)
+
+# Cleaning up and narrowing the data
+us_all <- us %>%
+  filter(Type=="Employed") %>%
+  mutate(hs_or_less=No.high.school.diploma+High.school.or.equivalent, some_college=Some.college..less.than.4.yr.degree) %>%
+  select(year, hs_or_less, some_college, Bachelor.s.degree.or.higher)
+
+# Restructuring the data in a way that will make it graphable with ggplot2
+us_all2 <- us_all %>%
+  gather("type", "employed", 2:4)
+
+us_all2$type <- gsub("Bachelor.s.degree.or.higher", "Bachelor's degree or higher", us_all2$type)
+us_all2$type <- gsub("hs_or_less", "High school or less", us_all2$type)
+us_all2$type <- gsub("some_college", "Associate's degree or some college", us_all2$type)
+
+# #8da0cb blue
+# #66c2a5 green
+# #fc8d62 red
+
+us_colors <- c('#66c2a5', '#fc8d62', '#8da0cb'  )
+
+names(us_colors) <- unique(us_change$type)
+
+#edu_colors <- c('#66c2a5', '#fc8d62', '#8da0cb')
+names(us_colors) <- colnames(us_change)[2:4]
+
+last_vals <- sapply(colnames(us_all)[2:4], function(x) last(na.exclude(us_all[,x])))
+last_date <- tail(us_all$year,1) # doing this ^ wld have made it a double
+
+us_hs_2015 <- tail(us_all$hs_or_less,1)
+us_sc_2015 <- tail(us_all$some_college ,1)
+us_bd_2015 <- tail(us_all$Bachelor.s.degree.or.higher,1)
+
+gg <- ggplot(us_all2)
+gg <- gg + geom_line(aes(x=year, y=employed, group=type, color=type))
+gg <- gg + annotate("rect", xmin = 2008, xmax =2010, ymin = -Inf, ymax = Inf,
+                    alpha = .1)
+gg <- gg + scale_color_manual(name="", values=us_colors)
+gg <- gg + labs(x=NULL, y="Jobs (millions)", title="Job change in recession and recovery in the U.S.",
+                subtitle="For the first time, workers with a Bachelor's degree or higher make up a larger share of the workforce (36%) \nthan those with a high school diplomar or less (34%)",
+                caption="SOURCE: U.S. Census CPS, Georgetown Center on Education and the Workforce")
+gg <- gg + theme_bw(base_family="Helvetica")
+gg <- gg + theme(axis.ticks.y=element_blank())
+gg <- gg + theme(panel.border=element_blank())
+gg <- gg + theme(legend.key=element_blank())
+gg <- gg + theme(plot.title=element_text(face="bold", family="Lato Black", size=22))
+gg <- gg + theme(plot.caption=element_text(face="bold", family="Lato", size=9, color="gray", margin=margin(t=10, r=80)))
+gg <- gg + geom_label(data=us, aes(x=2008, y=max(us_all2$employed) - max(us_all2$employed)*.15, label="Recession", hjust=-.1),
+                      family="Helvetica", lineheight=0.95,
+                      size=5, label.size=0, color="#2b2b2b")
+gg <- gg + geom_label(data=us, aes(x=2010, y=max(us_all2$employed) - max(us_all2$employed)*.15, label="Recovery", hjust=-.2),
+                      family="Helvetica", lineheight=0.95,
+                      size=5, label.size=0, color="#2b2b2b")
+gg <- gg + theme(legend.position="none")
+gg <- gg + theme(plot.margin = unit(c(1, 15, 1, 1), "lines"))
+gg <- gg + annotation_custom(grob=textGrob(paste0("High school or less (", us_hs_2015, ")"), hjust=-.3,
+                                           gp=gpar(fontsize=10, 
+                                                   col='#8da0cb')),
+                             xmin=2015,xmax=2015,
+                             ymin=us_hs_2015-500, ymax=us_hs_2015-500)
+gg <- gg + annotation_custom(grob=textGrob(paste0("Associate's degree or some college (", us_sc_2015, ")"), hjust=-.17,
+                             gp=gpar(fontsize=10, 
+                                     col='#fc8d62')),
+xmin=2015,xmax=2015,
+ymin=us_sc_2015, ymax=us_sc_2015)
+gg <- gg + annotation_custom(grob=textGrob(paste0("Bachelor's degree or higher (", us_bd_2015, ")"), hjust=-.20,  
+                             gp=gpar(fontsize=10, 
+                                     col='#66c2a5')),
+xmin=2015,xmax=2015,
+ymin=us_bd_2015+500, ymax=us_bd_2015+500)
+gg
+gb <- ggplot_build(gg)
+
+gt <- ggplot_gtable(gb)
+
+gt$layout$clip[gt$layout$name=="panel"] <- "off"
+grid.draw(gt)
+
+```
